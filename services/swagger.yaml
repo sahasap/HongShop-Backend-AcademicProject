@@ -1,0 +1,486 @@
+openapi: 3.0.0
+info:
+  title: Hong-Shop
+  version: 1.0.0
+  description: API สำหรับจัดการสินค้า (Products), สมาชิก (Members) และตะกร้าสินค้า/คำสั่งซื้อ (Carts/Orders)
+servers:
+  - url: http://localhost:3000
+
+tags:
+  - name: Products
+    description: การจัดการข้อมูลสินค้าและการค้นหา
+  - name: Members
+    description: การจัดการสมาชิก, การลงทะเบียน, และการยืนยันตัวตน
+  - name: Carts & Orders
+    description: การจัดการตะกร้าสินค้า (Active Cart) และประวัติคำสั่งซื้อ
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: token
+
+  schemas:
+    # --- Product Schemas ---
+    Brand:
+      type: object
+      properties:
+        brandId: { type: string }
+        brandName: { type: string }
+    ProductType:
+      type: object
+      properties:
+        pdTypeId: { type: string }
+        pdTypeName: { type: string }
+    Product:
+      type: object
+      properties:
+        pdId: { type: string }
+        pdName: { type: string }
+        pdPrice: { type: number }
+        pdRemark: { type: string, nullable: true }
+        pdTypeId: { type: string }
+        brandId: { type: string }
+        brand: { $ref: '#/components/schemas/Brand' }
+        pdt: { $ref: '#/components/schemas/ProductType' }
+    ProductBody:
+      type: object
+      required: [pdId, pdName, pdPrice, pdTypeId, brandId]
+      properties:
+        pdId: { type: string }
+        pdName: { type: string }
+        pdPrice: { type: number }
+        pdTypeId: { type: string }
+        brandId: { type: string }
+
+    # --- Member Schemas ---
+    MemberRegisterBody:
+      type: object
+      required: [memEmail, memName, password]
+      properties:
+        memEmail: { type: string, format: email }
+        memName: { type: string }
+        password: { type: string, format: password }
+    MemberLoginBody:
+      type: object
+      required: [loginName, password]
+      properties:
+        loginName: { type: string, format: email }
+        password: { type: string, format: password }
+    MemberRoleUpdateBody:
+      type: object
+      required: [memEmail, dutyId]
+      properties:
+        memEmail: { type: string, format: email }
+        dutyId: { type: string, enum: [member, admin] }
+    MemberProfileResponse:
+      type: object
+      properties:
+        memEmail: { type: string, format: email }
+        memName: { type: string }
+        dutyId: { type: string, enum: [member, admin] }
+        login: { type: boolean }
+
+    # --- Cart & Order Schemas ---
+    CartHeader:
+      type: object
+      properties:
+        cartId: { type: string }
+        cusId: { type: string, format: email }
+        cartDate: { type: string, format: 'date-time' }
+        cartCf: { type: boolean }
+        sqty: { type: number }
+        sprice: { type: number }
+    CartDetailItem:
+      type: object
+      properties:
+        row_number: { type: integer }
+        pdId: { type: string }
+        pdName: { type: string }
+        qty: { type: number }
+        price: { type: number }
+    CartItemBody:
+      type: object
+      required: [cartId, pdId]
+      properties:
+        cartId: { type: string }
+        pdId: { type: string }
+    CartItemUpdateQtyBody: # <--- เพิ่ม Schema นี้
+      type: object
+      required: [qty]
+      properties:
+        qty: { type: number, minimum: 1, description: "จำนวนสินค้าที่ต้องการอัปเดต" }
+    CartConfirmBody:
+      type: object
+      required: [cartId]
+      properties:
+        cartId: { type: string }
+    AdminHistoryBody:
+      type: object
+      required: [targetEmail]
+      properties:
+        targetEmail: { type: string, format: email }
+
+    # --- Shared Schema ---
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+
+paths:
+  #PRODUCTS API
+  /products:
+    get:
+      tags: [Products]
+      summary: ดึงข้อมูลสินค้าทั้งหมด
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Product' }}}}}
+        '500': { description: Server Error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' }}}}
+    post:
+      tags: [Products]
+      summary: (Admin) เพิ่มสินค้าใหม่
+      security:
+        - cookieAuth: []
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProductBody' }}}}
+      responses:
+        '201': { description: สร้างสินค้าสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '403': { description: ไม่มีสิทธิ์เข้าถึง }
+
+  /products/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string }}
+    get:
+      tags: [Products]
+      summary: ดึงข้อมูลสินค้าตาม ID
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Product' }}}}}
+        '404': { description: ไม่พบสินค้า }
+    put:
+      tags: [Products]
+      summary: (Admin) แก้ไขข้อมูลสินค้า และ/หรือ รูปภาพ
+      security:
+        - cookieAuth: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                pdName: { type: string }
+                pdPrice: { type: number }
+                pdRemark: { type: string }
+                pdTypeId: { type: string }
+                brandId: { type: string }
+                file: { type: string, format: binary }
+      responses:
+        '200': { description: แก้ไขสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '403': { description: ไม่มีสิทธิ์เข้าถึง }
+        '404': { description: ไม่พบสินค้า }
+    delete:
+      tags: [Products]
+      summary: (Admin) ลบสินค้าตาม ID
+      security:
+        - cookieAuth: []
+      responses:
+        '204': { description: ลบสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '403': { description: ไม่มีสิทธิ์เข้าถึง }
+        '404': { description: ไม่พบสินค้า }
+
+  /products/brands/{id}:
+    get:
+      tags: [Products]
+      summary: ค้นหาสินค้าตาม Brand ID
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }}
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Product' }}}}}
+
+  /products/search/{id}:
+    get:
+      tags: [Products]
+      summary: ค้นหาสินค้าจาก ID, ชื่อ, หรือ Remark
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }}
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Product' }}}}}
+  
+  /products/pdtypes: # <--- เพิ่ม Endpoint นี้
+    get:
+      tags: [Products]
+      summary: (Admin) ดึงข้อมูลประเภทสินค้าทั้งหมด
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ProductType' }}}}}
+
+  /products/brands: # <--- เพิ่ม Endpoint นี้
+    get:
+      tags: [Products]
+      summary: (Admin) ดึงข้อมูลแบรนด์ทั้งหมด
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Brand' }}}}}
+
+  /products/featured: # <--- เพิ่ม Endpoint นี้ (และลบ /products/three)
+    get:
+      tags: [Products]
+      summary: ดึงสินค้าแนะนำ
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Product' }}}}}
+
+  #MEMBERS API
+  /members/register:
+    post:
+      tags: [Members]
+      summary: สมัครสมาชิกใหม่
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MemberRegisterBody' }}}}
+      responses:
+        '201': { description: สมัครสำเร็จ }
+        '409': { description: อีเมลนี้มีในระบบแล้ว }
+
+  /members/login:
+    post:
+      tags: [Members]
+      summary: เข้าสู่ระบบ
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MemberLoginBody' }}}}
+      responses:
+        '200': { description: ล็อกอินสำเร็จ }
+        '401': { description: อีเมลหรือรหัสผ่านไม่ถูกต้อง }
+
+  /members/logout:
+    post: # <--- แก้ไขจาก GET เป็น POST
+      tags: [Members]
+      summary: ออกจากระบบ
+      security:
+        - cookieAuth: []
+      responses:
+        '200': { description: ออกจากระบบสำเร็จ }
+
+  /members/detail:
+    get:
+      tags: [Members]
+      summary: ดึงข้อมูลโปรไฟล์ของตัวเอง
+      security:
+        - cookieAuth: []
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { $ref: '#/components/schemas/MemberProfileResponse' }}}}
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+
+  /members/profile:
+    put:
+      tags: [Members]
+      summary: อัปเดตโปรไฟล์ (ชื่อ, รหัสผ่าน, และ/หรือ รูปภาพ)
+      security:
+        - cookieAuth: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                memName: { type: string }
+                password: { type: string, format: password }
+                file: { type: string, format: binary }
+      responses:
+        '200': { description: อัปเดตสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+
+  /members:
+    get:
+      tags: [Members]
+      summary: (Admin) ดึงข้อมูลสมาชิกทั้งหมด
+      security:
+        - cookieAuth: []
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/MemberProfileResponse' }}}}}
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '403': { description: ไม่มีสิทธิ์เข้าถึง }
+
+  /members/role:
+    put:
+      tags: [Members]
+      summary: (Admin) เปลี่ยนสิทธิ์สมาชิก
+      security:
+        - cookieAuth: []
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MemberRoleUpdateBody' }}}}
+      responses:
+        '200': { description: เปลี่ยนสิทธิ์สำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '403': { description: ไม่มีสิทธิ์เข้าถึง }
+        '404': { description: ไม่พบสมาชิก }
+        
+  #CARTS & ORDERS API
+  /carts/chkcart:
+    post:
+      tags: [Carts & Orders]
+      summary: ตรวจสอบตะกร้าที่ยังไม่ยืนยัน
+      security:
+        - cookieAuth: []
+      responses:
+        '200': 
+          description: สถานะตะกร้า
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cartExist: { type: boolean }
+                  carts: { type: array, items: { $ref: '#/components/schemas/CartHeader' }}
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+
+  /carts/addcart:
+    post:
+      tags: [Carts & Orders]
+      summary: สร้างตะกร้าเปล่าใหม่
+      security:
+        - cookieAuth: []
+      responses:
+        '200': { description: สร้างตะกร้าสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+
+  /carts/addcartdtl:
+    post:
+      tags: [Carts & Orders]
+      summary: เพิ่ม/อัปเดตสินค้าในตะกร้า (เพิ่มทีละ 1)
+      security:
+        - cookieAuth: []
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CartItemBody' }}}}
+      responses:
+        '200': { description: เพิ่ม/อัปเดตสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '404': { description: ไม่พบสินค้า }
+
+  /carts/confirm/{id}: # <--- แก้ไข Path และ Method
+    post: # <--- แก้ไขจาก PUT เป็น POST
+      tags: [Carts & Orders]
+      summary: ยืนยันตะกร้าสินค้า
+      security:
+        - cookieAuth: []
+      parameters: # <--- เพิ่ม Parameters
+        - { name: id, in: path, required: true, schema: { type: string }, description: "Cart ID ที่จะยืนยัน" }
+      # <--- ลบ RequestBody เดิม
+      responses:
+        '200': { description: ยืนยันสำเร็จ }
+        '400': { description: ยืนยันไม่สำเร็จ (อาจยืนยันไปแล้ว) }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+
+  /carts/delcartdtl:
+    delete:
+      tags: [Carts & Orders]
+      summary: ลบรายการสินค้าออกจากตะกร้า
+      security:
+        - cookieAuth: []
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CartItemBody' }}}}
+      responses:
+        '200': { description: ลบรายการสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '404': { description: ไม่พบรายการในตะกร้า }
+
+  /carts/updateqtydtl/{cartId}/{pdId}: # <--- เพิ่ม Endpoint นี้
+    put:
+      tags: [Carts & Orders]
+      summary: อัปเดตจำนวนสินค้าในตะกร้า
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: cartId, in: path, required: true, schema: { type: string }}
+        - { name: pdId, in: path, required: true, schema: { type: string }}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CartItemUpdateQtyBody'
+      responses:
+        '200': { description: อัปเดตจำนวนสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '404': { description: ไม่พบรายการในตะกร้า }
+
+  /carts/delcart:
+    delete:
+      tags: [Carts & Orders]
+      summary: ลบตะกร้าสินค้าที่ยังไม่ยืนยัน
+      security:
+        - cookieAuth: []
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CartConfirmBody' }}}}
+      responses:
+        '200': { description: ลบตะกร้าสำเร็จ }
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '404': { description: ไม่พบตะกร้า }
+        
+  /carts/getcartbycus:
+    post:
+      tags: [Carts & Orders]
+      summary: ดูประวัติคำสั่งซื้อของตัวเอง
+      security:
+        - cookieAuth: []
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CartHeader' }}}}}
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+
+  /carts/history: # <--- เพิ่ม Endpoint นี้
+    get:
+      tags: [Carts & Orders]
+      summary: ดูประวัติคำสั่งซื้อของตัวเอง (แบบ GET)
+      security:
+        - cookieAuth: []
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CartHeader' }}}}}
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+
+  /admin/history:
+    post:
+      tags: [Carts & Orders]
+      summary: (Admin) ดูประวัติคำสั่งซื้อตาม Email
+      security:
+        - cookieAuth: []
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/AdminHistoryBody' }}}}
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CartHeader' }}}}}
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '403': { description: ไม่มีสิทธิ์เข้าถึง }
+
+  /admin/orders: # <--- เพิ่ม Endpoint นี้
+    get:
+      tags: [Carts & Orders]
+      summary: (Admin) ดึงคำสั่งซื้อที่ยืนยันแล้วทั้งหมด
+      security:
+        - cookieAuth: []
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CartHeader' }}}}}
+        '401': { description: ไม่ได้ยืนยันตัวตน }
+        '403': { description: ไม่มีสิทธิ์เข้าถึง }
+
+  /carts/sumcart/{id}:
+    get:
+      tags: [Carts & Orders]
+      summary: ดึงผลรวมจำนวนและราคาในตะกร้า
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }}
+      responses:
+        '200': { description: สำเร็จ }
+
+  /carts/getcart/{id}:
+    get:
+      tags: [Carts & Orders]
+      summary: ดึงข้อมูลสรุปของตะกร้า (Header)
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }}
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CartHeader' }}}}}
+  
+  /carts/getcartdtl/{id}:
+    get:
+      tags: [Carts & Orders]
+      summary: ดึงรายการสินค้าทั้งหมดในตะกร้า (Details)
+      security:
+        - cookieAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string }}
+      responses:
+        '200': { description: สำเร็จ, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/CartDetailItem' }}}}}
